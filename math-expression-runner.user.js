@@ -15,6 +15,7 @@
 (function () {
   'use strict';
   function setIframe() {
+    let timer = -1;
     if (document.querySelector('#math-expression-runner')) {
       return
     }
@@ -23,17 +24,33 @@
     iframe.id = 'math-expression-runner';
     iframe.style.width = '500px';
     iframe.style.height = '80px';
-    iframe.style.border = 'solid 2px #ccc';
+    iframe.style.border = 'solid 1px #ccc';
     iframe.style.borderRadius = '4px';
     iframe.style.position = 'fixed';
-    iframe.style.right = '0';
-    iframe.style.bottom = '0';
-    iframe.style.zIndex = 9999999;
+    iframe.style.right = 0;
+    iframe.style.bottom = 0;
+    iframe.style.zIndex = 9999998;
     document?.body?.appendChild(iframe);
+
+    const div = document.createElement('div');
+    div.id = 'math-expression-runner-close';
+    div.style.position = 'fixed';
+    div.style.width = '44px';
+    div.style.height = '20px';
+    div.style.right = 0;
+    div.style.bottom = '60px';
+    div.style.zIndex = 9999999;
+    div.style.backgroundColor = 'transparent';
+    document?.body?.appendChild(div);
+    div.addEventListener('click', () => {
+      div.remove();
+      iframe.remove();
+      clearInterval(timer)
+    })
   }
 
   setIframe()
-  setInterval(() => {
+  timer = setInterval(() => {
     setIframe()
   }, 2000)
 })();

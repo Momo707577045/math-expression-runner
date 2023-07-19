@@ -118,7 +118,7 @@
       font-weight: bold;
     }
 
-    .result-box > div {
+    .result-box>div {
       padding: 10px 0;
     }
 
@@ -144,7 +144,7 @@
     .textarea-box {
       padding: 10px;
       box-sizing: border-box;
-      height: calc(100% - 300px);
+      height: calc(100% - 150px);
       width: 100%;
       position: relative;
       white-space: pre;
@@ -156,9 +156,6 @@
       overflow: auto;
       border-radius: 4px;
       font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
-    }
-
-    .textarea-box {
       border: 1px solid #cccccc;
       resize: none;
     }
@@ -172,7 +169,14 @@
     }
 
     .iframe-mode .result-box div {
-      padding: 0;
+      padding-top: 0;
+      padding-bottom: 0;
+    }
+
+    .iframe-mode .textarea-box {
+      border: 0;
+      padding: 4px 8px;
+      border-top: 1px solid #cccccc;
     }
   </style>
 </head>
@@ -205,8 +209,9 @@
       </div>
 
       <div class="right">
-        <div @click="format">格式化</div>
+        <div @click="format" v-if="!iframeMode">格式化</div>
         <div @click="jump" v-if="iframeMode">全屏</div>
+        <div v-if="iframeMode">关闭</div>
       </div>
     </div>
     <textarea v-model="sourceStr" class="textarea-box" :placeholder="testStr"></textarea>
@@ -252,6 +257,7 @@
     watch: {
       sourceStr: function (newValue) {
         localStorage.setItem('math-expression-runner_sourceStr', newValue)
+        this.sourceStr = this.iframeMode ? newValue.replace(/\n/ig, ' ').replace(/[ ]+/ig, ' ') : newValue;
         this.sourceResult = this.run(newValue);
       },
       selectedStr: function (newValue) {
