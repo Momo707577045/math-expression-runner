@@ -14,8 +14,8 @@
 
 (function () {
   'use strict';
+  let timer = -1;
   function setIframe() {
-    let timer = -1;
     if (document.querySelector('#math-expression-runner')) {
       return
     }
