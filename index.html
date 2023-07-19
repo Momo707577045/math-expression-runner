@@ -31,6 +31,7 @@
       height: 100%;
       margin: 0;
       padding: 0;
+      background-color: #fff;
     }
 
     #app {
@@ -104,13 +105,39 @@
       bottom: 70px;
     }
 
+    .result-box {
+      display: flex;
+      justify-content: space-between;
+    }
+
     .result-box div {
-      padding: 10px 20px 10px 0;
       display: inline-block;
       height: 20px;
       font-size: 16px;
       line-height: 20px;
       font-weight: bold;
+    }
+
+    .result-box > div {
+      padding: 10px 0;
+    }
+
+    .result-box .left div {
+      margin-right: 20px;
+    }
+
+    .result-box .right div {
+      margin-top: -4px;
+      margin-left: 20px;
+      display: inline-block;
+      font-size: 14px;
+      color: white;
+      padding: 4px 8px;
+      text-align: center;
+      min-width: 10px;
+      cursor: pointer;
+      border-radius: 4px;
+      background-color: #3D8AC7;
     }
 
     /*字体文件载入*/
@@ -145,7 +172,7 @@
     }
 
     .iframe-mode .result-box div {
-      padding: 0 20px 0 0;
+      padding: 0;
     }
   </style>
 </head>
@@ -167,13 +194,20 @@
       <section class="p-action g-box">{{ tips }}</section>
       <a class="p-github" target="_blank" href="https://github.com/Momo707577045/math-expression-runner">github</a>
       <a class="p-tamper" target="_blank"
-        href="https://github.com/Momo707577045/json-remark-parse/raw/master/json-parse.user.js">油猴插件</a>
+        href="https://blog.luckly-mjw.cn/tool-show/math-expression-runner/math-expression-runner.user.js">油猴插件</a>
       <a class="p-other" target="_blank" href="http://blog.luckly-mjw.cn/tool-show/index.html">其他实用工具</a>
     </template>
 
     <div class="result-box">
-      <div>表达式值: {{sourceResult}}</div>
-      <div>选区值: {{selectedResult}}</div>
+      <div class="left">
+        <div>表达式值: {{sourceResult}}</div>
+        <div>选区值: {{selectedResult}}</div>
+      </div>
+
+      <div class="right">
+        <div @click="format">格式化</div>
+        <div @click="jump" v-if="iframeMode">全屏</div>
+      </div>
     </div>
     <textarea v-model="sourceStr" class="textarea-box" :placeholder="testStr"></textarea>
   </section>
@@ -202,7 +236,8 @@
       return {
         tips: '快速数学运算器',
         iframeMode: window.parent !== window, // 是否使用 iframe 简洁模式
-        sourceStr: localStorage.getItem('math-expression-runner_sourceStr') || '请输入数学运算表达式', // 源码字符串
+        // iframeMode: true, // 是否使用 iframe 简洁模式
+        sourceStr: localStorage.getItem('math-expression-runner_sourceStr') || '', // 源码字符串
         sourceResult: '', // 整个运算结果
         selectedStr: '', // 选中的字符串
         selectedResult: '', // 选中的表达式的运算结果
@@ -231,6 +266,15 @@
     },
 
     methods: {
+      jump() {
+        window.open('https://blog.luckly-mjw.cn/tool-show/math-expression-runner/index.html?sourceResult=' + this.sourceResult);
+      },
+
+      // 重排版，替换换行符
+      format() {
+        this.sourceStr = this.sourceStr.replace(/\n/ig, ' ').replace(/[ ]+/ig, ' ');
+      },
+
       // 运行
       run(targetStr) {
         const regex = /[\d\.+\-*/()\s]+/g;
