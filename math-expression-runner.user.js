@@ -15,12 +15,13 @@
 
 (function () {
   'use strict';
-  GM_registerMenuCommand("开启", function () {
-    setIframe()
-  });
-  GM_registerMenuCommand("关闭", function () {
-    document.querySelector('#math-expression-runner')?.remove();
-    document.querySelector('#math-expression-runner-close')?.remove();
+  GM_registerMenuCommand("开启/关闭", function () {
+    if (document.querySelector('#math-expression-runner')) {
+      document.querySelector('#math-expression-runner')?.remove();
+      document.querySelector('#math-expression-runner-close')?.remove();
+    } else {
+      setIframe()
+    }
   });
   function setIframe() {
     if (document.querySelector('#math-expression-runner')) {
