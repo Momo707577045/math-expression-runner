@@ -9,17 +9,24 @@
 // @description  https://github.com/Momo707577045/math-expression-runner 配套插件
 // @downloadURL	 https://blog.luckly-mjw.cn/tool-show/math-expression-runner/math-expression-runner.user.js
 // @updateURL	   https://blog.luckly-mjw.cn/tool-show/math-expression-runner/math-expression-runner.user.js
-// @grant        none
+// @grant        GM_registerMenuCommand
 // @run-at document-start
 // ==/UserScript==
 
 (function () {
   'use strict';
-  let timer = -1;
+  GM_registerMenuCommand("开启", function () {
+    setIframe()
+  });
+  GM_registerMenuCommand("关闭", function () {
+    document.querySelector('#math-expression-runner')?.remove();
+    document.querySelector('#math-expression-runner-close')?.remove();
+  });
   function setIframe() {
     if (document.querySelector('#math-expression-runner')) {
       return
     }
+
     const iframe = document.createElement('iframe');
     iframe.src = 'https://blog.luckly-mjw.cn/tool-show/math-expression-runner/index.html';
     iframe.id = 'math-expression-runner';
@@ -39,19 +46,13 @@
     div.style.width = '44px';
     div.style.height = '20px';
     div.style.right = 0;
-    div.style.bottom = '60px';
+    div.style.bottom = '70px';
     div.style.zIndex = 9999999;
     div.style.backgroundColor = 'transparent';
     document?.body?.appendChild(div);
     div.addEventListener('click', () => {
       div.remove();
       iframe.remove();
-      clearInterval(timer)
     })
   }
-
-  setIframe()
-  timer = setInterval(() => {
-    setIframe()
-  }, 2000)
 })();
