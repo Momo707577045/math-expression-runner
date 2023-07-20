@@ -124,6 +124,7 @@
 
     .result-box .left div {
       margin-right: 20px;
+      white-space: pre;
     }
 
     .result-box .right div {
@@ -138,6 +139,10 @@
       cursor: pointer;
       border-radius: 4px;
       background-color: #3D8AC7;
+    }
+
+    .result-box .right div:nth-child(1) {
+      margin-left: 0 !important;
     }
 
     /*字体文件载入*/
@@ -169,6 +174,7 @@
     }
 
     .iframe-mode .result-box div {
+      margin: 0;
       padding-top: 0;
       padding-bottom: 0;
     }
@@ -204,8 +210,14 @@
 
     <div class="result-box">
       <div class="left">
-        <div>表达式值: {{sourceResult}}</div>
-        <div>选区值: {{selectedResult}}</div>
+        <template v-if="!iframeMode">
+          <div :title="sourceExp">表达式值: {{sourceResult}} = {{ sourceExp }}</div>
+          <div>选区值: {{selectedResult}} = {{ selectedExp }}</div>
+        </template>
+        <template v-else>
+          <div v-if="!selectedStr">{{sourceResult}} = {{ sourceExp }}</div>
+          <div v-else>{{selectedResult}} = {{ selectedExp }}</div>
+        </template>
       </div>
 
       <div class="right">
@@ -230,9 +242,10 @@
 <script src="https://upyun.luckly-mjw.cn/lib/vue.js"></script>
 <script>
   document.getElementById('loading') && document.getElementById('loading').remove()
-  document.addEventListener("selectionchange", () => {
-    console.log('selectionchange')
-    window.vueInstance.$data.selectedStr = window.getSelection().toString().trim();
+  document.addEventListener("selectionchange", (event) => {
+    if (event.target.activeElement.localName === 'textarea') {
+      window.vueInstance.$data.selectedStr = window.getSelection().toString().trim();
+    }
   });
   window.vueInstance = new Vue({
     el: '#app',
@@ -243,8 +256,10 @@
         iframeMode: window.parent !== window, // 是否使用 iframe 简洁模式
         // iframeMode: true, // 是否使用 iframe 简洁模式
         sourceStr: localStorage.getItem('math-expression-runner_sourceStr') || '', // 源码字符串
+        sourceExp: '', // 源码字符串的数学表达式
         sourceResult: '', // 整个运算结果
         selectedStr: '', // 选中的字符串
+        selectedExp: '', // 选中的字符串的数学表达式
         selectedResult: '', // 选中的表达式的运算结果
         testStr: `请输入数学运算表达式，如 1 + 2 * 3
 【】支持换行
@@ -257,23 +272,33 @@
     watch: {
       sourceStr: function (newValue) {
         localStorage.setItem('math-expression-runner_sourceStr', newValue)
-        this.sourceStr = this.iframeMode ? newValue.replace(/\n/ig, ' ').replace(/[ ]+/ig, ' ') : newValue;
-        this.sourceResult = this.run(newValue);
+        this.selectedStr = '';
+        this.sourceStr = this.iframeMode ? newValue.replace(/\n/ig, ' ') : newValue;
+        ({
+          exp: this.sourceExp,
+          value: this.sourceResult,
+        } = this.run(newValue));
       },
       selectedStr: function (newValue) {
-        this.selectedResult = this.run(newValue);
+        ({
+          exp: this.selectedExp,
+          value: this.selectedResult,
+        } = this.run(newValue));
       },
     },
 
     mounted() {
-      this.sourceResult = this.run(new URL(location.href).searchParams.get('sourceStr') || this.sourceStr);
+      ({
+        exp: this.sourceExp,
+        value: this.sourceResult,
+      } = this.run(new URL(location.href).searchParams.get('sourceStr') || this.sourceStr));
       // 从 URL 参数中提取传参
       // 考虑 iframe 的嵌入式使用方式
     },
 
     methods: {
       jump() {
-        window.open('https://blog.luckly-mjw.cn/tool-show/math-expression-runner/index.html?sourceResult=' + this.sourceResult);
+        window.open('https://blog.luckly-mjw.cn/tool-show/math-expression-runner/index.html?sourceResult=' + this.sourceStr);
       },
 
       // 重排版，替换换行符
@@ -302,11 +327,16 @@
 
         // 输出结果
         try {
-          console.log(mathStr, eval(mathStr));
           targetStr && window.history.replaceState(null, '', `${location.href.split('?')[0]}?sourceResult=${targetStr}`)
-          return eval(mathStr)
+          return {
+            exp: mathStr,
+            value: eval(mathStr),
+          }
         } catch (error) {
-          return error.toString();
+          return {
+            exp: mathStr,
+            value: '表达式错误',
+          }
         }
       },
     },
