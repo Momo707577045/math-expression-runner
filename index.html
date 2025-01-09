@@ -107,6 +107,8 @@
 
     .result-box {
       display: flex;
+      width: 100%;
+      overflow-x: auto;
       justify-content: space-between;
     }
 
@@ -120,6 +122,7 @@
 
     .result-box>div {
       padding: 10px 0;
+      white-space: pre;
     }
 
     .result-box .left div {
@@ -127,7 +130,7 @@
       white-space: pre;
     }
 
-    .result-box .right div {
+    .result-box .right div, .btn {
       margin-top: -4px;
       margin-left: 20px;
       display: inline-block;
@@ -212,7 +215,7 @@
     <div class="result-box">
       <div class="left">
         <template v-if="!iframeMode">
-          <div :title="sourceExp">表达式值: {{sourceResult}} = {{ sourceExp }}</div>
+          <div v-if="isShowSourceExp" :title="sourceExp">表达式值: {{sourceResult}} = {{ sourceExp }}</div>
           <div>选区值: {{selectedResult}} = {{ selectedExp }}</div>
         </template>
         <template v-else>
@@ -222,6 +225,7 @@
       </div>
 
       <div class="right">
+        <div @click="showSourceExp" >仅划屏</div>
         <div @click="format" v-if="!iframeMode">格式化</div>
         <div @click="jump" v-if="iframeMode">全屏</div>
         <div v-if="iframeMode">关闭</div>
@@ -244,7 +248,7 @@
 <script>
   document.getElementById('loading') && document.getElementById('loading').remove()
   document.addEventListener("selectionchange", (event) => {
-    if (event.target.activeElement.localName === 'textarea') {
+    if (event.target?.localName === 'textarea') {
       window.vueInstance.$data.selectedStr = window.getSelection().toString().trim();
     }
   });
@@ -257,6 +261,7 @@
         iframeMode: window.parent !== window, // 是否使用 iframe 简洁模式
         // iframeMode: true, // 是否使用 iframe 简洁模式
         sourceStr: localStorage.getItem('math-expression-runner_sourceStr') || '', // 源码字符串
+        isShowSourceExp: localStorage.getItem('math-expression-runner_isShowSourceExp') !== 'false', // 是否显示表达式
         sourceExp: '', // 源码字符串的数学表达式
         sourceResult: '', // 整个运算结果
         selectedStr: '', // 选中的字符串
@@ -298,6 +303,31 @@
     },
 
     methods: {
+      showSourceExp() {
+        this.isShowSourceExp = !this.isShowSourceExp;
+        localStorage.setItem('math-expression-runner_isShowSourceExp', this.isShowSourceExp)
+      },
+
+       // 拷贝剪切板
+      copyToClipboard(content) {
+
+        if (!document.queryCommandSupported('copy')) {
+          return false
+        }
+
+        let $input = document.createElement('textarea')
+        $input.style.opacity = '0'
+        $input.value = content
+        document.body.appendChild($input)
+        $input.select()
+
+        const result = document.execCommand('copy')
+        document.body.removeChild($input)
+        $input = null
+
+        return result
+      },
+
       jump() {
         window.open('https://blog.luckly-mjw.cn/tool-show/math-expression-runner/index.html?sourceResult=' + this.sourceStr);
       },
