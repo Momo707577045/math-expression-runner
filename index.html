@@ -168,11 +168,60 @@
       resize: none;
     }
 
+    .contenteditable-box {
+      padding: 10px;
+      box-sizing: border-box;
+      height: calc(100% - 150px);
+      width: 100%;
+      position: relative;
+      white-space: pre-wrap;
+      text-align: left;
+      color: #333333;
+      vertical-align: text-top;
+      font-size: 14px;
+      line-height: 16px;
+      overflow: auto;
+      border-radius: 4px;
+      font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+      border: 1px solid #cccccc;
+      resize: none;
+      outline: none;
+    }
+
+    .contenteditable-box:empty:before {
+      content: attr(data-placeholder);
+      color: #999;
+      pointer-events: none;
+    }
+
+    .number-highlight {
+      background-color: #fff3cd;
+      cursor: pointer;
+      padding: 2px 0;
+      border-radius: 2px;
+      transition: background-color 0.2s;
+    }
+
+    .number-highlight:hover {
+      background-color: #ffe69c;
+    }
+
+    .number-selected {
+      background-color: #4CAF50 !important;
+      color: white;
+      font-weight: bold;
+    }
+
+    .number-selected:hover {
+      background-color: #45a049 !important;
+    }
+
     .iframe-mode {
       padding: 0;
     }
 
-    .iframe-mode .textarea-box {
+    .iframe-mode .textarea-box,
+    .iframe-mode .contenteditable-box {
       height: calc(100% - 20px);
     }
 
@@ -183,7 +232,8 @@
       font-size: 14px;
     }
 
-    .iframe-mode .textarea-box {
+    .iframe-mode .textarea-box,
+    .iframe-mode .contenteditable-box {
       border: 0;
       padding: 4px 8px;
       border-top: 1px solid #cccccc;
@@ -231,7 +281,15 @@
         <div v-if="iframeMode">关闭</div>
       </div>
     </div>
-    <textarea v-model="sourceStr" class="textarea-box" :placeholder="testStr"></textarea>
+    <div 
+      ref="contentEditableBox"
+      contenteditable="true" 
+      class="contenteditable-box" 
+      @input="handleInput"
+      @paste="handlePaste"
+      @keydown="handleKeydown"
+      :data-placeholder="testStr"
+    ></div>
   </section>
 </body>
 <script>
@@ -248,8 +306,21 @@
 <script>
   document.getElementById('loading') && document.getElementById('loading').remove()
   document.addEventListener("selectionchange", (event) => {
-    if (event.target?.localName === 'textarea') {
-      window.vueInstance.$data.selectedStr = window.getSelection().toString().trim();
+    const selection = window.getSelection();
+    const selectedText = selection.toString().trim();
+    if (selectedText && window.vueInstance) {
+      // 检查选中的文本是否来自 contenteditable
+      const range = selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+      if (range) {
+        const container = range.commonAncestorContainer;
+        const contentEditableBox = window.vueInstance.$refs.contentEditableBox;
+        if (contentEditableBox && (contentEditableBox.contains(container) || contentEditableBox === container)) {
+          // 排除点击数字高亮的情况
+          if (!container.parentElement?.classList?.contains('number-highlight')) {
+            window.vueInstance.$data.selectedStr = selectedText;
+          }
+        }
+      }
     }
   });
   window.vueInstance = new Vue({
@@ -267,6 +338,8 @@
         selectedStr: '', // 选中的字符串
         selectedExp: '', // 选中的字符串的数学表达式
         selectedResult: '', // 选中的表达式的运算结果
+        selectedNumbers: new Set(), // 选中的数字集合
+        highlightTimeout: null, // 高亮更新的定时器
         testStr: `请输入数学运算表达式，如 1 + 2 * 3
 【】支持换行
 【】支持划区选中计算，如 1 + 2 * 3 中，选中 2 * 3 则得 6
@@ -279,11 +352,19 @@
       sourceStr: function (newValue) {
         localStorage.setItem('math-expression-runner_sourceStr', newValue)
         this.selectedStr = '';
-        this.sourceStr = this.iframeMode ? newValue.replace(/\n/ig, ' ') : newValue;
         ({
           exp: this.sourceExp,
           value: this.sourceResult,
         } = this.run(newValue));
+        // 更新 contenteditable 内容和高亮显示
+        this.$nextTick(() => {
+          const displayValue = this.iframeMode ? newValue.replace(/\n/ig, ' ') : newValue;
+          const box = this.$refs.contentEditableBox;
+          if (box && box.textContent !== displayValue) {
+            box.textContent = displayValue;
+          }
+          this.highlightNumbers();
+        });
       },
       selectedStr: function (newValue) {
         ({
@@ -300,9 +381,190 @@
       } = this.run(new URL(location.href).searchParams.get('sourceStr') || this.sourceStr));
       // 从 URL 参数中提取传参
       // 考虑 iframe 的嵌入式使用方式
+      // 初始化高亮显示
+      this.$nextTick(() => {
+        this.updateContentEditable();
+        this.highlightNumbers();
+      });
     },
 
     methods: {
+      // 更新 contenteditable 的内容
+      updateContentEditable() {
+        const box = this.$refs.contentEditableBox;
+        if (box) {
+          const displayValue = this.iframeMode ? this.sourceStr.replace(/\n/ig, ' ') : this.sourceStr;
+          if (box.textContent !== displayValue) {
+            box.textContent = displayValue;
+          }
+        }
+      },
+
+      // 处理输入事件
+      handleInput(event) {
+        const text = event.target.textContent || event.target.innerText || '';
+        this.sourceStr = text;
+        // 延迟更新高亮，避免频繁更新
+        clearTimeout(this.highlightTimeout);
+        this.highlightTimeout = setTimeout(() => {
+          this.highlightNumbers();
+        }, 100);
+      },
+
+      // 处理粘贴事件
+      handlePaste(event) {
+        event.preventDefault();
+        const text = (event.clipboardData || window.clipboardData).getData('text');
+        document.execCommand('insertText', false, text);
+      },
+
+      // 处理键盘事件
+      handleKeydown(event) {
+        // 允许 Tab 键插入制表符
+        if (event.key === 'Tab') {
+          event.preventDefault();
+          document.execCommand('insertText', false, '  ');
+        }
+      },
+
+      // 高亮显示数字
+      highlightNumbers() {
+        const box = this.$refs.contentEditableBox;
+        if (!box) return;
+
+        // 获取纯文本内容（去除 HTML 标签）
+        const text = box.innerText || box.textContent || '';
+        const numberRegex = /(\d+\.?\d*)/g;
+        let match;
+        const numbers = [];
+        
+        // 找到所有数字及其位置
+        while ((match = numberRegex.exec(text)) !== null) {
+          numbers.push({
+            value: match[0],
+            index: match.index,
+            length: match[0].length
+          });
+        }
+
+        // 保存当前光标位置
+        const selection = window.getSelection();
+        let range = null;
+        let cursorOffset = 0;
+        
+        if (selection.rangeCount > 0) {
+          range = selection.getRangeAt(0).cloneRange();
+          // 计算光标在文本中的偏移量
+          const preCaretRange = range.cloneRange();
+          preCaretRange.selectNodeContents(box);
+          preCaretRange.setEnd(range.startContainer, range.startOffset);
+          cursorOffset = preCaretRange.toString().length;
+        }
+        
+        // 重新构建 HTML
+        let html = '';
+        let lastIndex = 0;
+        let htmlOffset = 0; // HTML 中的字符偏移量
+        
+        numbers.forEach((num, idx) => {
+          // 添加数字前的文本
+          const beforeText = text.substring(lastIndex, num.index);
+          html += this.escapeHtml(beforeText);
+          htmlOffset += beforeText.length;
+          
+          // 添加数字（带高亮）
+          const isSelected = this.selectedNumbers.has(num.value);
+          const className = isSelected ? 'number-highlight number-selected' : 'number-highlight';
+          html += `<span class="${className}" data-number="${this.escapeHtml(num.value)}" data-index="${idx}">${this.escapeHtml(num.value)}</span>`;
+          htmlOffset += num.value.length;
+          
+          lastIndex = num.index + num.length;
+        });
+        
+        // 添加剩余文本
+        html += this.escapeHtml(text.substring(lastIndex));
+        
+        box.innerHTML = html;
+        
+        // 恢复光标位置（简化版本，在文本末尾）
+        if (range && cursorOffset > 0) {
+          try {
+            // 尝试将光标设置到接近原位置
+            const walker = document.createTreeWalker(
+              box,
+              NodeFilter.SHOW_TEXT,
+              null
+            );
+            let currentOffset = 0;
+            let targetNode = null;
+            let targetOffset = 0;
+            
+            let node;
+            while (node = walker.nextNode()) {
+              const nodeLength = node.textContent.length;
+              if (currentOffset + nodeLength >= cursorOffset) {
+                targetNode = node;
+                targetOffset = cursorOffset - currentOffset;
+                break;
+              }
+              currentOffset += nodeLength;
+            }
+            
+            if (targetNode) {
+              const newRange = document.createRange();
+              newRange.setStart(targetNode, Math.min(targetOffset, targetNode.textContent.length));
+              newRange.collapse(true);
+              selection.removeAllRanges();
+              selection.addRange(newRange);
+            }
+          } catch (e) {
+            // 如果恢复失败，将光标放在末尾
+            const newRange = document.createRange();
+            newRange.selectNodeContents(box);
+            newRange.collapse(false);
+            selection.removeAllRanges();
+            selection.addRange(newRange);
+          }
+        }
+        
+        // 绑定点击事件
+        this.bindNumberClickEvents();
+      },
+
+      // 转义 HTML
+      escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+      },
+
+      // 绑定数字点击事件
+      bindNumberClickEvents() {
+        const box = this.$refs.contentEditableBox;
+        if (!box) return;
+
+        const numberSpans = box.querySelectorAll('.number-highlight');
+        numberSpans.forEach(span => {
+          span.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const numberValue = span.getAttribute('data-number');
+            this.toggleNumberSelection(numberValue);
+          });
+        });
+      },
+
+      // 切换数字选中状态
+      toggleNumberSelection(numberValue) {
+        if (this.selectedNumbers.has(numberValue)) {
+          this.selectedNumbers.delete(numberValue);
+        } else {
+          this.selectedNumbers.add(numberValue);
+        }
+        // 重新高亮
+        this.highlightNumbers();
+      },
+
       showSourceExp() {
         this.isShowSourceExp = !this.isShowSourceExp;
         localStorage.setItem('math-expression-runner_isShowSourceExp', this.isShowSourceExp)
@@ -335,6 +597,10 @@
       // 重排版，替换换行符
       format() {
         this.sourceStr = this.sourceStr.replace(/\n/ig, ' ').replace(/[ ]+/ig, ' ');
+        this.$nextTick(() => {
+          this.updateContentEditable();
+          this.highlightNumbers();
+        });
       },
 
       // 运行
