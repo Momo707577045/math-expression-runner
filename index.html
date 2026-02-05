@@ -367,8 +367,8 @@
       sourceStr: function (newValue) {
         localStorage.setItem('math-expression-runner_sourceStr', newValue)
         this.selectedStr = '';
-        // 当内容变化时，清空选中状态（因为数字位置可能已变化）
-        this.selectedNumbers.clear();
+        // 注意：不再自动清空 selectedNumbers，保持用户的忽略选择
+        // 用户可以通过双击数字来手动切换忽略状态
         
         // 更新数字列表（不重建 DOM），供 run 方法使用
         const text = this.iframeMode ? newValue.replace(/\n/ig, ' ') : newValue;
