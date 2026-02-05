@@ -195,25 +195,26 @@
     }
 
     .number-highlight {
-      background-color: #fff3cd;
+      background-color: #7BD784;
       cursor: pointer;
-      padding: 2px 0;
+      padding: 2px 6px;
       border-radius: 2px;
-      transition: background-color 0.2s;
     }
 
     .number-highlight:hover {
-      background-color: #ffe69c;
+      background-color: #7BD784;
     }
 
     .number-selected {
-      background-color: #4CAF50 !important;
-      color: white;
-      font-weight: bold;
+      background-color: #ccc !important;
+      color: black !important;
+      opacity: 0.5;
+      text-decoration: line-through;
     }
 
     .number-selected:hover {
-      background-color: #45a049 !important;
+      background-color: #d0d0d0 !important;
+      opacity: 0.6;
     }
 
     .iframe-mode {
@@ -307,7 +308,8 @@
   document.getElementById('loading') && document.getElementById('loading').remove()
   document.addEventListener("selectionchange", (event) => {
     const selection = window.getSelection();
-    const selectedText = selection.toString().trim();
+    const originalText = selection.toString();
+    const selectedText = originalText.trim();
     if (selectedText && window.vueInstance) {
       // 检查选中的文本是否来自 contenteditable
       const range = selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
@@ -317,7 +319,16 @@
         if (contentEditableBox && (contentEditableBox.contains(container) || contentEditableBox === container)) {
           // 排除点击数字高亮的情况
           if (!container.parentElement?.classList?.contains('number-highlight')) {
+            // 计算选区的起始位置
+            const preCaretRange = document.createRange();
+            preCaretRange.selectNodeContents(contentEditableBox);
+            preCaretRange.setEnd(range.startContainer, range.startOffset);
+            // 计算前导空白的长度（因为 selectedText 被 trim 了）
+            const leadingWhitespace = originalText.length - originalText.trimStart().length;
+            const startOffset = preCaretRange.toString().length + leadingWhitespace;
+            
             window.vueInstance.$data.selectedStr = selectedText;
+            window.vueInstance.$data.selectedOffset = startOffset;
           }
         }
       }
@@ -336,14 +347,18 @@
         sourceExp: '', // 源码字符串的数学表达式
         sourceResult: '', // 整个运算结果
         selectedStr: '', // 选中的字符串
+        selectedOffset: 0, // 选中字符串在源字符串中的起始位置
         selectedExp: '', // 选中的字符串的数学表达式
         selectedResult: '', // 选中的表达式的运算结果
-        selectedNumbers: new Set(), // 选中的数字集合
+        selectedNumbers: new Set(), // 选中的数字索引集合（存储位置索引，而不是数字值）
+        numbersList: [], // 所有数字的列表，包含位置和值信息
         highlightTimeout: null, // 高亮更新的定时器
+        isEditing: false, // 是否正在编辑中
+        pendingHighlight: false, // 是否有待处理的高亮更新
         testStr: `请输入数学运算表达式，如 1 + 2 * 3
 【】支持换行
 【】支持划区选中计算，如 1 + 2 * 3 中，选中 2 * 3 则得 6
-【】数字间默认执行 “加” 操作，如 1 2 3 则得 6
+【】支持省略操作符，数字间默认执行 “加” 操作，如 1 2 3 则得 6
 `,
       }
     },
@@ -352,25 +367,47 @@
       sourceStr: function (newValue) {
         localStorage.setItem('math-expression-runner_sourceStr', newValue)
         this.selectedStr = '';
+        // 当内容变化时，清空选中状态（因为数字位置可能已变化）
+        this.selectedNumbers.clear();
+        
+        // 更新数字列表（不重建 DOM），供 run 方法使用
+        const text = this.iframeMode ? newValue.replace(/\n/ig, ' ') : newValue;
+        const numberRegex = /(\d+\.?\d*)/g;
+        let match;
+        const numbers = [];
+        while ((match = numberRegex.exec(text)) !== null) {
+          numbers.push({
+            value: match[0],
+            index: match.index,
+            length: match[0].length
+          });
+        }
+        this.numbersList = numbers;
+        
+        // 计算表达式（不等待高亮更新）
         ({
           exp: this.sourceExp,
           value: this.sourceResult,
         } = this.run(newValue));
-        // 更新 contenteditable 内容和高亮显示
-        this.$nextTick(() => {
-          const displayValue = this.iframeMode ? newValue.replace(/\n/ig, ' ') : newValue;
-          const box = this.$refs.contentEditableBox;
-          if (box && box.textContent !== displayValue) {
-            box.textContent = displayValue;
-          }
-          this.highlightNumbers();
-        });
+        
+        // 如果不是正在编辑，则立即更新 DOM
+        if (!this.isEditing) {
+          this.$nextTick(() => {
+            const displayValue = this.iframeMode ? newValue.replace(/\n/ig, ' ') : newValue;
+            const box = this.$refs.contentEditableBox;
+            if (box && box.textContent !== displayValue) {
+              box.textContent = displayValue;
+            }
+            this.highlightNumbers();
+          });
+        }
       },
       selectedStr: function (newValue) {
+        // 传入 selectedOffset 用于正确过滤选区内的数字
         ({
           exp: this.selectedExp,
           value: this.selectedResult,
-        } = this.run(newValue));
+        } = this.run(newValue, this.selectedOffset));
       },
     },
 
@@ -402,13 +439,34 @@
 
       // 处理输入事件
       handleInput(event) {
-        const text = event.target.textContent || event.target.innerText || '';
+        const box = this.$refs.contentEditableBox;
+        // 获取纯文本内容，确保正确处理 DOM 结构
+        const text = this.getPlainText(box);
+        
+        // 标记正在编辑
+        this.isEditing = true;
+        
+        // 更新 sourceStr
         this.sourceStr = text;
-        // 延迟更新高亮，避免频繁更新
-        clearTimeout(this.highlightTimeout);
+        
+        // 使用防抖延迟高亮更新，避免频繁重建 DOM
+        if (this.highlightTimeout) {
+          clearTimeout(this.highlightTimeout);
+        }
+        this.pendingHighlight = true;
         this.highlightTimeout = setTimeout(() => {
+          this.isEditing = false;
+          this.pendingHighlight = false;
           this.highlightNumbers();
-        }, 100);
+        }, 300); // 300ms 防抖延迟
+      },
+
+      // 获取纯文本内容（处理复杂 DOM 结构，保留换行）
+      getPlainText(element) {
+        // 使用 innerText 可以正确处理换行（<br>、<div> 等会被转换为 \n）
+        // 但 innerText 会触发重排，性能略差
+        // 这里使用 innerText 以确保换行符被正确保留
+        return element.innerText || '';
       },
 
       // 处理粘贴事件
@@ -431,9 +489,14 @@
       highlightNumbers() {
         const box = this.$refs.contentEditableBox;
         if (!box) return;
+        
+        // 如果正在编辑中，不进行高亮更新（除非是延迟触发的）
+        if (this.isEditing && !this.pendingHighlight) {
+          return;
+        }
 
-        // 获取纯文本内容（去除 HTML 标签）
-        const text = box.innerText || box.textContent || '';
+        // 使用 sourceStr 作为数据源，确保与 run 方法一致
+        const text = this.iframeMode ? this.sourceStr.replace(/\n/ig, ' ') : this.sourceStr;
         const numberRegex = /(\d+\.?\d*)/g;
         let match;
         const numbers = [];
@@ -446,6 +509,9 @@
             length: match[0].length
           });
         }
+        
+        // 保存数字列表，供 run 方法使用
+        this.numbersList = numbers;
 
         // 保存当前光标位置
         const selection = window.getSelection();
@@ -472,8 +538,8 @@
           html += this.escapeHtml(beforeText);
           htmlOffset += beforeText.length;
           
-          // 添加数字（带高亮）
-          const isSelected = this.selectedNumbers.has(num.value);
+          // 添加数字（带高亮）- 使用索引来判断是否选中
+          const isSelected = this.selectedNumbers.has(idx);
           const className = isSelected ? 'number-highlight number-selected' : 'number-highlight';
           html += `<span class="${className}" data-number="${this.escapeHtml(num.value)}" data-index="${idx}">${this.escapeHtml(num.value)}</span>`;
           htmlOffset += num.value.length;
@@ -527,7 +593,7 @@
           }
         }
         
-        // 绑定点击事件
+        // 绑定点击事件（使用改进的方式）
         this.bindNumberClickEvents();
       },
 
@@ -545,24 +611,38 @@
 
         const numberSpans = box.querySelectorAll('.number-highlight');
         numberSpans.forEach(span => {
-          span.addEventListener('click', (e) => {
+          // 使用双击来触发数字的选中/取消选中
+          // 单击用于定位光标进行编辑
+          span.addEventListener('dblclick', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            const numberValue = span.getAttribute('data-number');
-            this.toggleNumberSelection(numberValue);
+            const numberIndex = parseInt(span.getAttribute('data-index'), 10);
+            this.toggleNumberSelection(numberIndex);
           });
         });
       },
 
-      // 切换数字选中状态
-      toggleNumberSelection(numberValue) {
-        if (this.selectedNumbers.has(numberValue)) {
-          this.selectedNumbers.delete(numberValue);
+      // 切换数字选中状态（使用索引）
+      toggleNumberSelection(numberIndex) {
+        if (this.selectedNumbers.has(numberIndex)) {
+          this.selectedNumbers.delete(numberIndex);
         } else {
-          this.selectedNumbers.add(numberValue);
+          this.selectedNumbers.add(numberIndex);
         }
         // 重新高亮
         this.highlightNumbers();
+        // 重新计算表达式（因为被选中的数字会影响计算结果）
+        ({
+          exp: this.sourceExp,
+          value: this.sourceResult,
+        } = this.run(this.sourceStr));
+        // 如果当前有选中文本，也重新计算（传入 selectedOffset）
+        if (this.selectedStr) {
+          ({
+            exp: this.selectedExp,
+            value: this.selectedResult,
+          } = this.run(this.selectedStr, this.selectedOffset));
+        }
       },
 
       showSourceExp() {
@@ -604,11 +684,63 @@
       },
 
       // 运行
-      run(targetStr) {
+      // offset: 目标字符串在源字符串中的起始位置偏移量（用于选区计算）
+      run(targetStr, offset = 0) {
+        // 获取被选中（置灰）的数字索引集合
+        const disabledIndexes = this.selectedNumbers || new Set();
+        const numbersList = this.numbersList || [];
+        
+        // 如果字符串为空，直接返回
+        if (!targetStr) {
+          return {
+            exp: '',
+            value: '',
+          }
+        }
+
+        // 根据索引位置移除被选中的数字
+        let processedStr = targetStr;
+        if (disabledIndexes.size > 0 && numbersList.length > 0) {
+          // 找出在目标字符串范围内且被选中的数字
+          const numbersInRange = [];
+          disabledIndexes.forEach(idx => {
+            const numInfo = numbersList[idx];
+            if (numInfo) {
+              // 计算相对于目标字符串的位置
+              const relativeIndex = numInfo.index - offset;
+              // 检查数字是否在目标字符串的范围内
+              if (relativeIndex >= 0 && relativeIndex + numInfo.length <= targetStr.length) {
+                // 验证该位置的数字值是否匹配（确保位置正确）
+                const valueAtPosition = targetStr.substring(relativeIndex, relativeIndex + numInfo.length);
+                if (valueAtPosition === numInfo.value) {
+                  numbersInRange.push({
+                    ...numInfo,
+                    relativeIndex: relativeIndex
+                  });
+                }
+              }
+            }
+          });
+          
+          // 从后往前替换，避免位置偏移问题
+          numbersInRange.sort((a, b) => b.relativeIndex - a.relativeIndex);
+          numbersInRange.forEach(numInfo => {
+            const before = processedStr.substring(0, numInfo.relativeIndex);
+            const after = processedStr.substring(numInfo.relativeIndex + numInfo.length);
+            processedStr = before + ' ' + after;
+          });
+          
+          // 清理多余的空格和连续的操作符
+          // 移除连续的空格
+          processedStr = processedStr.replace(/\s+/g, ' ');
+          // 清理开头和结尾的空格
+          processedStr = processedStr.trim();
+        }
+
         const regex = /[\d\.+\-*/()\s]+/g;
         let preKeyIsNum = false
         let defaultAction = '+'
-        const mathStr = targetStr.match(regex)?.join(' ').replace(/\n/ig, ' ').split(' ').map((key => {
+        const mathStr = processedStr.match(regex)?.join(' ').replace(/\n/ig, ' ').split(' ').map((key => {
           key = key.trim();
           let result = key
           if (!key) {
@@ -627,7 +759,7 @@
           targetStr && window.history.replaceState(null, '', `${location.href.split('?')[0]}?sourceResult=${targetStr}`)
           return {
             exp: mathStr,
-            value: eval(mathStr),
+            value: mathStr ? eval(mathStr) : '',
           }
         } catch (error) {
           return {
