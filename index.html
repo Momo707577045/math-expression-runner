@@ -759,7 +759,7 @@
           targetStr && window.history.replaceState(null, '', `${location.href.split('?')[0]}?sourceResult=${targetStr}`)
           return {
             exp: mathStr,
-            value: mathStr ? eval(mathStr) : '',
+            value: mathStr ? this.fixFloat(eval(mathStr), mathStr) : '',
           }
         } catch (error) {
           return {
@@ -767,6 +767,18 @@
             value: '表达式错误',
           }
         }
+      },
+      // 修正浮点精度：根据表达式中数字的最大小数位数，对 eval 结果做 toFixed 修正
+      fixFloat(result, expr) {
+        if (typeof result !== 'number' || !isFinite(result)) return result;
+        // 提取表达式中所有数字，计算最大小数位数
+        const nums = expr.match(/\d+\.?\d*/g) || [];
+        const maxDp = nums.reduce((max, n) => {
+          const dot = n.indexOf('.');
+          return dot === -1 ? max : Math.max(max, n.length - dot - 1);
+        }, 0);
+        // 用 parseFloat 去掉末尾多余的 0
+        return parseFloat(result.toFixed(Math.max(maxDp, 0)));
       },
     },
   })
